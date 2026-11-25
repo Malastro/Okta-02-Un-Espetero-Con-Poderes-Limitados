@@ -367,3 +367,252 @@ Posteriormente, se comprobó desde la cuenta Super Administrator que Javier hab�
 El usuario mantuvo su pertenencia a `Max&Henry`, por lo que continuó dentro del ámbito administrativo del bar.
 
 Con esta restauración se evitó dejar modificaciones innecesarias en las reglas y pertenencias configuradas durante el laboratorio anterior.
+
+## 5. Pruebas y resultados
+
+Una vez configurada la administración delegada, se realizaron varias pruebas para comprobar los permisos efectivos de Fermín Trujillo y las restricciones aplicadas mediante el Custom Admin Role y el Resource Set.
+
+### 5.1. Pruebas funcionales
+
+| Prueba | Acción realizada | Resultado observado | Estado |
+|---|---|---|---|
+| 01. Acceso administrativo | Iniciar sesión como Fermín y acceder a la Admin Console. | Acceso correcto tras resolver una incidencia de autenticación. | Correcto |
+| 02. Visibilidad de usuarios | Consultar Directory → People desde la cuenta de Fermín. | Aparecen Fermín, Lola y Javi. | Correcto |
+| 03. Restricción del ámbito | Comprobar la presencia de Antonio Recio en el listado. | Antonio no aparece entre los usuarios visibles. | Correcto |
+| 04. Modificación autorizada | Cambiar el atributo `Title` de Lola Trujillo. | El cambio se guarda y se verifica desde Super Administrator. | Correcto |
+| 05. Auditoría de modificación | Buscar la actualización de Lola en System Log. | Evento `Update user profile for Okta` con resultado `SUCCESS`. | Correcto |
+| 06. Restricciones administrativas | Examinar las acciones disponibles sobre Javier Maroto. | No aparecen opciones para suspender, desactivar o restablecer contraseñas. | Verificado en la interfaz |
+| 07. Modificación de atributo personalizado | Cambiar `cargoVecinal` de Javi a `Presidente`. | Fermín puede guardar el cambio. | Correcto |
+| 08. Pertenencia indirecta | Comprobar `Junta de Gobierno` después de modificar `cargoVecinal`. | Okta incorpora automáticamente a Javi mediante una Group Rule. | Confirmado |
+| 09. Auditoría del cambio indirecto | Revisar los eventos de actualización de perfil y pertenencia. | Se identifican eventos `SUCCESS` de Fermín Trujillo y Okta System. | Correcto |
+| 10. Restauración | Devolver `cargoVecinal` a `ExPresidente`. | Javi deja de pertenecer a `Junta de Gobierno`. | Correcto |
+
+Las pruebas confirmaron que Fermín podía consultar y modificar los perfiles incluidos en su ámbito administrativo, mientras que los usuarios ajenos al Max & Henry no aparecían en su listado.
+
+No se realizaron pruebas de escritura sobre usuarios externos mediante API. Por tanto, la restricción del ámbito se verificó a través de la visibilidad y las operaciones disponibles en la consola administrativa.
+
+### 5.2. Hallazgo de seguridad: autorización indirecta mediante atributos
+
+La prueba más relevante surgió al investigar las consecuencias del permiso `Edit users' profile attributes`.
+
+Inicialmente, el diseño parecía suficientemente limitado: Fermín podía administrar únicamente las identidades de Lola y Javi.
+
+Sin embargo, ambos usuarios disponían del atributo personalizado `cargoVecinal`, utilizado por las Group Rules del laboratorio anterior.
+
+Al modificar el atributo de Javier Maroto de `ExPresidente` a `Presidente`, Fermín desencadenó una incorporación automática a `Junta de Gobierno`.
+
+La operación quedó reflejada mediante dos eventos:
+
+**Acción directa**
+
+- Actor: Fermín Trujillo.
+- Evento: `Update user profile for Okta`.
+- Usuario afectado: Javier Maroto.
+- Resultado: `SUCCESS`.
+
+**Consecuencia automática**
+
+- Actor: Okta System.
+- Evento: `Add user to group membership`.
+- Usuario afectado: Javier Maroto.
+- Grupo: `Junta de Gobierno`.
+- Resultado: `SUCCESS`.
+
+Ambos eventos se registraron el 25 de noviembre de 2026 a las 18:20:26.
+
+Este comportamiento demuestra que **limitar los usuarios que puede administrar una identidad no necesariamente limita todos los efectos de modificar sus atributos**.
+
+Aunque Fermín no administraba directamente `Junta de Gobierno`, podía provocar cambios en su composición mediante una regla automática.
+
+### 5.3. Evaluación del impacto
+
+Durante las pruebas se comprobó que `Junta de Gobierno` no tenía aplicaciones ni roles administrativos asignados.
+
+En consecuencia, la incorporación de Javier no supuso una escalada efectiva de privilegios en el entorno utilizado.
+
+No obstante, el comportamiento observado representa un riesgo potencial en organizaciones donde los grupos determinan el acceso a aplicaciones, información o recursos sensibles.
+
+Para reducirlo sería necesario evaluar qué administradores pueden modificar los atributos utilizados en decisiones de acceso y aplicar controles adicionales cuando corresponda.
+
+Estas medidas se identificaron como recomendaciones; no se implementaron durante el laboratorio.
+
+### 5.4. Resultado final
+
+El modelo de administración delegada funcionó para las operaciones previstas:
+
+- Fermín pudo consultar y editar los perfiles de Lola y Javi.
+- Antonio Recio permaneció fuera de su ámbito visible.
+- Las operaciones sensibles de ciclo de vida no aparecían disponibles en la interfaz.
+- Las modificaciones se registraron en System Log.
+
+La prueba de `cargoVecinal` también demostró que el alcance de una delegación administrativa debe evaluarse considerando las automatizaciones que dependen de los atributos modificables.
+
+Al finalizar, Javier recuperó su valor original `ExPresidente` y dejó de pertenecer a `Junta de Gobierno`.
+
+**Resultado del laboratorio:** administración delegada funcional, restricciones observadas en la consola y un riesgo de autorización indirecta identificado mediante pruebas y registros de auditoría.
+
+## 6. Problemas encontrados y decisiones técnicas
+
+Durante el laboratorio surgieron dos incidencias que impidieron inicialmente completar las pruebas. Ambas se investigaron y resolvieron antes de continuar.
+
+También se identificó una limitación de seguridad en el diseño de permisos.
+
+### 6.1. Resource Set configurado con un tipo de recurso incorrecto
+
+La primera configuración de `Personal Max & Henry` utilizó el tipo de recurso:
+
+`Groups → Max&Henry`
+
+Sin embargo, el Custom Admin Role `Gerente del bar` contenía permisos para consultar y editar usuarios.
+
+Al iniciar sesión como Fermín, la consola mostraba únicamente su propia identidad. Lola y Javi no aparecían en el listado.
+
+Para investigar el problema, se revisó la configuración del rol y la vista previa del Resource Set.
+
+Se comprobó que el Resource Set contenía recursos de tipo `Groups`, mientras que los permisos definidos estaban orientados a operaciones sobre usuarios.
+
+**Solución aplicada**
+
+Se editó el Resource Set existente y se sustituyó la selección inicial por:
+
+`Users → Add users from the following groups → Max&Henry`
+
+No fue necesario eliminar el Resource Set ni recrear el Custom Admin Role.
+
+Después de guardar los cambios y actualizar la sesión de Fermín, aparecieron Lola Trujillo y Javier Maroto en **Directory → People**.
+
+**Conclusión técnica:** un Resource Set puede estar correctamente creado y asignado, pero contener recursos que no correspondan a los permisos del rol asociado.
+
+Por eso, durante la validación de la administración delegada es necesario comprobar tanto los permisos concedidos como el tipo y alcance de los recursos incluidos.
+
+### 6.2. Bloqueo de autenticación por Okta Account Management Policy
+
+Durante el primer intento de inicio de sesión con Fermín, Okta rechazó una operación relacionada con la autenticación.
+
+En **Reports → System Log** se identificó el siguiente evento:
+
+| Campo | Resultado |
+|---|---|
+| Fecha | 25/11/2026 |
+| Hora | 17:52:01 |
+| Actor | Fermín Trujillo |
+| Evento | Evaluation of Okta Account Management Policy |
+| Resultado | DENY |
+| Regla | Phishing resistant authenticator enrollment |
+
+La regla exigía la utilización de dos tipos de factores y contemplaba métodos como contraseña, Okta Verify y passkeys.
+
+Tras revisar y resolver la configuración de autenticación, Fermín pudo acceder a la Admin Console.
+
+Esta incidencia permitió diferenciar dos controles de seguridad que intervienen en momentos distintos:
+
+**Autenticación:** determina si una identidad puede completar el proceso necesario para acceder a un recurso.
+
+**Autorización:** determina qué operaciones puede realizar una identidad después de autenticarse.
+
+La asignación del Custom Admin Role no eliminaba los requisitos de autenticación establecidos por las políticas de Okta.
+
+La investigación se apoyó en System Log para identificar la regla implicada.
+
+### 6.3. Limitación de los permisos de edición de atributos
+
+Durante la creación del Custom Admin Role se comprobó que la interfaz disponible no ofrecía una opción para restringir la edición de atributos concretos.
+
+El permiso `Edit users' profile attributes` permitió a Fermín modificar el atributo personalizado `cargoVecinal` de Javier Maroto.
+
+Esta capacidad resultó relevante porque dicho atributo intervenía en una Group Rule que determinaba la pertenencia a `Junta de Gobierno`.
+
+**Problema identificado:** un administrador con permisos limitados a determinados usuarios podía provocar efectos sobre un grupo ajeno a su ámbito de administración mediante la edición de atributos.
+
+**Comportamiento demostrado:** Javier fue incorporado automáticamente a `Junta de Gobierno` después de que Fermín cambiara su atributo a `Presidente`.
+
+El cambio quedó registrado en System Log y fue revertido posteriormente.
+
+**Decisión adoptada:** conservar el diseño del laboratorio para documentar el comportamiento observado y sus implicaciones de seguridad, sin introducir cambios adicionales en las reglas existentes.
+
+En un entorno empresarial sería necesario estudiar mecanismos que impidan a los administradores delegados modificar atributos utilizados para conceder accesos sensibles.
+
+La disponibilidad de restricciones por atributo dependería de las funcionalidades y condiciones del entorno de Okta.
+
+### 6.4. Diferenciar restricciones observadas de denegaciones verificadas
+
+Durante las pruebas se comprobó que Fermín no disponía en la interfaz de opciones para suspender, desactivar o restablecer contraseñas de los usuarios administrados.
+
+Este comportamiento era coherente con los permisos configurados en `Gerente del bar`.
+
+Sin embargo, no se realizaron solicitudes directas a la API para obtener respuestas explícitas de autorización denegada.
+
+Por tanto, el resultado se documentó como **restricción verificada en la interfaz**, sin presentarlo como una prueba completa de denegación por API.
+
+Esta distinción permite reflejar con precisión el alcance de las comprobaciones realizadas.
+
+## 7. Conclusiones
+
+La gestión del Max & Henry permitió implementar y comprobar un modelo de **administración delegada en Okta**, aplicando los principios de Role-Based Access Control (RBAC) y mínimo privilegio.
+
+Mediante un Custom Admin Role y un Resource Set, se concedieron a Fermín Trujillo permisos para consultar y modificar los perfiles de los usuarios vinculados al establecimiento, sin asignarle un rol de Super Administrator.
+
+Las pruebas realizadas desde su propia cuenta confirmaron que podía administrar a Lola Trujillo y Javier Maroto. Por el contrario, Antonio Recio y el resto de las identidades ajenas al ámbito delegado no aparecían en su listado de usuarios.
+
+También se comprobó que Fermín no disponía en la interfaz de las opciones necesarias para suspender, desactivar o restablecer contraseñas.
+
+La modificación autorizada del atributo `Title` de Lola quedó registrada en System Log con resultado `SUCCESS`, demostrando que las operaciones del administrador delegado podían auditarse.
+
+### El principal hallazgo: los permisos pueden tener efectos indirectos
+
+La parte más relevante del laboratorio surgió al investigar el atributo personalizado `cargoVecinal`, utilizado por las Group Rules configuradas en Okta 01.
+
+Aunque Fermín no administraba directamente `Junta de Gobierno`, consiguió incorporar a Javier Maroto a ese grupo modificando su atributo de `ExPresidente` a `Presidente`.
+
+System Log permitió distinguir las dos operaciones: Fermín actualizó el perfil del usuario y Okta System ejecutó la incorporación automática mediante una Group Rule.
+
+Esta prueba puso de manifiesto una limitación del diseño: **controlar qué usuarios puede editar un administrador no garantiza que los efectos de esas modificaciones queden restringidos al mismo ámbito**.
+
+En este caso no se produjo una escalada efectiva de privilegios, ya que `Junta de Gobierno` no tenía aplicaciones ni roles administrativos asignados. Sin embargo, en un entorno empresarial, un comportamiento similar podría afectar al acceso a recursos protegidos mediante grupos.
+
+El hallazgo demuestra la importancia de evaluar las dependencias entre atributos, reglas automáticas y autorizaciones antes de conceder permisos de edición de perfiles.
+
+### Competencias IAM trabajadas
+
+- Configuración de Custom Admin Roles y Resource Sets.
+- Delegación de permisos mediante grupos de administradores.
+- Aplicación práctica de RBAC y mínimo privilegio.
+- Validación de permisos efectivos desde una cuenta delegada.
+- Diferenciación entre controles de autenticación y autorización.
+- Diagnóstico de errores de configuración de recursos.
+- Auditoría de modificaciones y cambios automáticos mediante System Log.
+- Identificación de riesgos de autorización indirecta asociados a atributos y Group Rules.
+
+### Mejoras identificadas
+
+En un entorno empresarial, el diseño podría reforzarse mediante controles adicionales sobre los atributos utilizados para tomar decisiones de acceso.
+
+También sería conveniente ampliar la validación con pruebas de autorización mediante API y revisar periódicamente las asignaciones administrativas para detectar permisos innecesarios.
+
+Estas mejoras no se implementaron durante el laboratorio.
+
+**Resultado final:** se verificó una administración delegada funcional, con permisos limitados sobre un conjunto específico de usuarios. Además, se identificó y reprodujo un riesgo de autorización indirecta derivado de la interacción entre la edición de atributos y las Group Rules.
+
+Fermín Trujillo ya puede gestionar al personal del Max & Henry sin convertirse en administrador de todo Montepinar. Eso sí, hemos descubierto que tocar el atributo equivocado puede terminar metiendo a Javi otra vez en la Junta de Gobierno. Incluso en Okta, el espetero consigue montar un lío.
+
+## 8. Referencias
+
+### Documentación oficial de Okta
+
+- [Okta — Custom Admin Roles](https://help.okta.com/oie/en-us/content/topics/security/custom-admin-role/about-creating-custom-admin-roles.htm)
+- [Okta — Role Permissions](https://help.okta.com/oie/en-us/content/topics/security/custom-admin-role/about-role-permissions.htm)
+- [Okta — Create a Resource Set](https://help.okta.com/oie/en-us/content/topics/security/custom-admin-role/create-resource-set.htm)
+- [Okta — Edit a Resource Set](https://help.okta.com/oie/en-us/content/topics/security/custom-admin-role/edit-resource-set.htm)
+- [Okta — Create an Admin Assignment Using a Resource Set](https://help.okta.com/oie/en-us/content/topics/security/custom-admin-role/create-admin-role-assignment-by-resource-set.htm)
+- [Okta — Group Rules](https://help.okta.com/en-us/Content/Topics/users-groups-profiles/usgp-about-group-rules.htm)
+- [Okta — System Log](https://help.okta.com/oie/en-us/Content/Topics/Reports/Reports_SysLog.htm)
+
+### Referencia del episodio
+
+- [La que se avecina — Temporada 7, episodio 4: «Un espetero-hostelero, una agonía rural y unas gotitas de burundanga»](https://www.formulatv.com/series/la-que-se-avecina/capitulos/15310/)
+
+### Laboratorio relacionado
+
+- [Okta 01 — Un presidente, unos privilegios y un Cuqui descontrolado](https://github.com/Malastro/Okta-01-Un-cuqui-presidente-)
+
+El laboratorio utiliza identidades y situaciones ficticias inspiradas en *La que se avecina*. Las configuraciones técnicas y las pruebas descritas se realizaron en un entorno de prácticas de Okta.
