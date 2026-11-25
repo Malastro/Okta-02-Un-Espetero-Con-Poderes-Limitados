@@ -272,7 +272,7 @@ La operación también quedó registrada en **Reports → System Log**:
 
 **Evidencia 02 — Administración efectiva de usuarios**
 
-![Prueba de administración delegada realizada con la cuenta de Fermín](screenshots/02-FerminAdmin.png)
+![Prueba de administración delegada realizada con la cuenta de Fermín](screenshots/02-FerminAdmi.png)
 
 La prueba permitió comprobar que los permisos concedidos eran suficientes para modificar atributos de un usuario incluido en el Resource Set.
 
